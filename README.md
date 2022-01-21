@@ -1,9 +1,10 @@
 # Stocks-Analysis
 
 Stock Analysis Tool is a fun and easy-to-use application that can help users describe and predict stock prices by inserting a unique ticker symbol. The application is built in Python 3 and uses text-based interface (Command Line Interface) to allow users to interact with the application. 
-To successfully operate the tool, users should not only install Python 3 but they should also import packages such as Tkinter, yFinance and others . The entire set of packages and functionalities will be explored in the next sections. 
+To successfully operate the tool, users should not only install Python 3 but they should also import packages.
 
  Packages and Software to pip-install. 
+ 
 yFinance - This package is used to extract stock data from Yahoo Finance.
 Pandas - software library for data manipulation and analysis 
 Numpy - software library used for working with numerical data
