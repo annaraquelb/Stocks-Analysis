@@ -1,0 +1,807 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Wed Nov 24 20:03:21 2021
+
+@author: Ashish Moossaddee
+@author: Anna Raquel Carvalho
+@author: Silvia Pavone
+@author: Elizaveta
+@author: Aidan
+"""
+
+import matplotlib.pyplot as plt
+#import seaborn as sns
+import yfinance as yf
+import tkinter as tk
+from tkinter import ttk
+import tkinter.font as font
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+import pandas as pd
+from scipy import stats
+from sklearn import metrics
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import confusion_matrix, accuracy_score
+from sklearn import preprocessing
+from urllib.request import urlopen
+from gnews import GNews
+import datetime
+from datetime import datetime as dt
+import pmdarima as pm
+import io
+import numpy as np
+from PIL import Image, ImageTk
+from ctypes import windll
+windll.shcore.SetProcessDpiAwareness(1)
+
+
+#This Class is used to initial the GUI of the stock up and contains multiple 
+#functions to display the various screens within the app
+class StockApp(tk.Tk):
+
+    def __init__(self, *args, **kwargs):
+        tk.Tk.__init__(self, *args, **kwargs)
+
+        # Checks the users display resolution and assigns dpi accordingly
+        user32 = windll.user32
+        screensize = user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
+        if screensize==(2256, 1504):
+            self.dpi = 130
+        else:
+            self.dpi = 100
+      
+        # creates all the tkinter widgets that are used by the various analysis       
+        self.title("Stock Analysis Tool v0.1")
+        self.overrideredirect(True)
+        self.overrideredirect(False)
+        self.configure(bg='grey')
+        #self.tk.call('tk', 'scaling', 1.5)
+        self.attributes('-fullscreen',True)
+        
+        self.grid_rowconfigure(2, weight=1)
+        self.grid_columnconfigure(1, weight=1)
+
+        Header_Font = ('Segoe Script',36,"bold")
+        Main_Font = ('Segoe Script',36,"bold")
+        self.rectangle_2 = tk.Label(self, 
+                                    text="Stock Analysis Tool", 
+                                    bg="#78866b", 
+                                    fg="black",
+                                    font=Header_Font)
+        #Grid function is used throughout the code to display Frames and widgets. 
+        #Pack() is also performs the same task but doesn't use the grid system
+        self.rectangle_2.grid(ipadx=10, ipady=10,columnspan = 1000,sticky="ew") 
+
+        self.side_frame = tk.Frame(self,bg='#78866b',width=500,height=500)
+        self.side_frame.grid_rowconfigure(8, weight=1)
+        
+        self.home_frame = tk.Frame(self,bg='#78866b')
+        self.home_frame.grid_rowconfigure(4, weight=1)
+        self.home_frame.grid(row = 1, column=1,pady=20,rowspan=5)
+        
+
+        self.stock_label = tk.Label(self.home_frame, bg="#78866b", 
+                                    text="Welcome to Stock Analysis App. Enter the stock symbol to get started.",
+                                    font=('Helvetica',12,'bold'))
+        self.stock_label.grid(row=0,column=0,pady=10)
+        self.stock_label = tk.Label(self.home_frame, text="Stock Symbol: ",bg="#659e9a")
+        self.stock_label.grid(row=1,column=0)
+        self.name_entry = tk.Entry(self.home_frame, width=15)
+        self.name_entry.grid(row=2,column=0)
+        self.name_entry.focus()    
+        self.btn_go = tk.Button(self.home_frame, text = "Start Analysis", command = self.StartAnalysis)
+        self.btn_go.grid(row=4,column=0,sticky='s')
+
+        languages = [("5 days", '5d'),
+                     ("1 month", '1mo'),
+                     ("3 months", '3mo'),
+                     ("YTD",'ytd'),
+                     ("1 year", '1y'),
+                     ("5 years", '5y')]
+    
+      #      1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y and ytd
+
+        self.Frame_radio = tk.Frame(self.home_frame)
+        self.Frame_radio.grid(row=3,column=0,pady=20)
+        self.Period_label = tk.Label(self.Frame_radio, text="Select Period", fg="black")
+        self.Period_label.grid(ipadx=0, ipady=0,sticky="n")
+        self.var = tk.StringVar(self,'5d')
+
+        col = 1
+    
+        for text, val in languages:
+            tk.Radiobutton(self.Frame_radio, 
+                           text=text,
+                           indicatoron = 0,
+                           width = 10,
+                           padx = 20, 
+                           background = "light blue",
+                           font=("Segoe UI Semibold", 10),
+                           variable=self.var,
+                           command = self.set_period,
+                           value=val).grid(row=col,column=0,stick='w')
+            col=col+1
+    
+        # Creates all the buttons for the home screen
+        self.btn_home = tk.Button(self.side_frame, text="Home",width = 15,height=3,command = self.HomeFrame)
+        self.btn_quit = tk.Button(self, text = "Quit",bg='light blue', command = self.quit,font=('Helvetica',16))
+        self.btn_basicinfo = tk.Button(self.side_frame, text="Basic Info",width = 15,height=3,command = self.BasicFrame)
+        self.btn_descriptive = tk.Button(self.side_frame, text="Descriptive Analysis",width = 15,height=3,command=self.DescriptiveFrame)
+        self.btn_charts = tk.Button(self.side_frame, text="Technical Indicators",width = 15,height=3,command= self.ChartFrame)
+        self.btn_predictive = tk.Button(self.side_frame, text="Predictive Analysis",width = 15,height=3,command= self.PrescriptiveFrame)
+        
+        # Places the buttons on the Tkinter GUI
+        self.btn_quit.grid(row=4,column=2,sticky = 'sw',padx=10,pady=10)      
+        
+        #Creates blank scrollable window for the Charts Frame in GUI
+        self.Frame1 = tk.Frame(self,width=2000, height=1500,bd=5)        
+        self.canvas = tk.Canvas(self.Frame1,width=1800, height=1000)
+        self.scrollbar = tk.Scrollbar(self.Frame1, orient="vertical", command=self.canvas.yview)
+        self.scrollable_frame = tk.Frame(self.canvas,width=1800, height=1000)
+
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+        
+        self.canvas.pack(side='left',expand=True,fill='both')
+ 
+        self.canvas_window = self.canvas.create_window((0, 0), window=self.scrollable_frame,anchor = 'nw')
+
+        self.scrollbar.pack(side='right',expand=1,fill='both')      
+
+        self.scrollable_frame.bind(
+            "<Configure>",
+            lambda e: self.canvas.configure(
+                scrollregion=self.canvas.bbox("all")
+            )
+        )
+
+        #set up blank frames to be used in the GUI
+        self.Frame2 = tk.Frame(self,width=200, height=200, bd =5)
+        self.Frame3 = tk.Frame(self,width=200, height=200, bd =5)
+        self.Arima_Frame = tk.Frame(self,width=200, height=400, bd =5)
+        self.LP_Frame = tk.Frame(self,width=200, height=400, bd =5)
+        self.Pred_Frame = tk.Frame(self,width=200, height=400, bd =5)
+
+        #Creates the buttons and labels to switch between Predictive Models
+        self.btn_LP = tk.Button(self.Pred_Frame, text="Linear Regression",width = 15,height=3,command = self.LP_frame)
+        self.btn_arima = tk.Button(self.Pred_Frame, text = "Arima Model",width = 15,height=3,command =self.Arima_frame)
+        self.arima_label = tk.Label(self.Pred_Frame,text='Choose Predictive Model',font=('Helvetica',10,'bold'))
+        self.arima_label.grid(row=0,sticky='ew')
+        self.btn_arima.grid(row=1,sticky='ew')
+        self.btn_LP.grid(row=2,sticky='ew')
+
+    #This function is used to hide all the frames within the app
+    def hide_all_frame(self):
+        '''Show a frame for the given page name'''
+        frames = [self.home_frame,self.Frame1, self.Frame2, self.Frame3,self.Pred_Frame,self.Arima_Frame,self.LP_Frame]
+        for frame in frames:
+            frame.grid_forget()  #grid_forget() is used to hide frames
+        pass
+
+    #Pulls the data from Yahoo Finance API that is used for descriptive analytics and Technical Indicators   
+    def getdata(self):
+        if self.name_entry.get() != "":
+            stock = self.name_entry.get()  
+            period = self.set_period()
+            df = yf.download(stock, period = period)  #Pulls data from Yahoo Finance
+            if df.empty == False:  #Check if dataframe is empty
+                df.reset_index(level=0, inplace=True)
+                df["Date"] = pd.to_datetime(df["Date"])
+                #df.drop(columns=['Dividends','Stock Splits'])
+                return(df)
+            else:
+                tk.messagebox.showerror("Incorrect Stock Symbol", "We could not find this stock symbol in the Yahoo Finance database. You have entered an incorrect Stock Symbol!")
+        else:
+            tk.messagebox.showerror("Missing Stock Symbol", "You have not entered a Stock Symbol!")
+
+    #This function is used as command for the quit button. Exits the application
+    def quit(self):
+        res = tk.messagebox.askquestion('Quit', 'Do you want Quit? Any unsaved analysis will be lost')
+        if res == 'yes':
+            self.destroy()  #Destroys the main gui screen
+        else:
+            pass 
+
+    #Changes the color of the left side menu based on the screen the user is at
+    def change_button_color(self,number):
+          buttons = [self.btn_home,self.btn_basicinfo,   #Left side menu buttons listed
+                     self.btn_descriptive, 
+                     self.btn_charts, 
+                     self.btn_predictive]
+          buttons[number]["background"] = buttons[number]["activebackground"] = "#6B62C7"
+          for button in buttons:
+              if button == buttons[number]:
+                  pass
+              else:
+                  button.configure(background="SystemButtonFace")
+          pass
+
+    #Takes the user back to the stock input Home screen
+    def HomeFrame(self):
+        self.change_button_color(0)
+        self.hide_all_frame()
+        self.btn_pred_Frame.grid_forget()
+        self.home_frame.grid(row = 1, column=1,pady=20,rowspan=5)
+    
+    #This function displays the menu options on the left after validating the data. 
+    #Takes user to Basic Info
+    def StartAnalysis(self):
+        global df
+        df = self.getdata()
+        if df.empty != None:
+            self.hide_all_frame()
+            self.side_frame.grid(row=1,column=0,rowspan=4,sticky = 'ns')
+            self.btn_home.grid(row=0,column=0,padx=10,pady=10)
+            self.btn_basicinfo.grid(row=1,column=0,padx=10,pady=10)
+            self.btn_descriptive.grid(row=2,column=0,sticky = 'n',padx=10,pady=10)
+            self.btn_charts.grid(row=3,column=0,sticky = 'n',padx=10,pady=10)
+            self.btn_predictive.grid(row=4,column=0,padx=10,pady=10)
+            self.BasicFrame()
+            self.change_button_color(1)
+        else:
+            pass
+        
+    def set_period(self):
+        period = self.var.get()
+        return(period)
+
+    #This function displays the Basic Information screen
+    def BasicFrame(self):
+        global tk_img
+        self.hide_all_frame()
+        self.change_button_color(1)
+        stock = self.name_entry.get()
+        stockinfo = yf.Ticker(stock)
+        company_name = stockinfo.info['longName']
+        sector = stockinfo.info['sector']
+        business_summary = stockinfo.info['longBusinessSummary']
+        country = stockinfo.info['country']
+        logo = stockinfo.info['logo_url']
+        fiftyTwoWeekChange = stockinfo.info['52WeekChange']
+        fiftyTwoWeekHigh = stockinfo.info['fiftyTwoWeekHigh']
+        fiftyTwoWeekLow = stockinfo.info['fiftyTwoWeekLow']
+
+        introduction = f'''Company name: {company_name}
+
+Country: {country}
+        
+Sector: {sector}
+
+52 week High: {fiftyTwoWeekHigh}
+
+52 week Low: {fiftyTwoWeekLow}
+
+About the Company:            
+{business_summary}
+'''
+
+        self.Frame2.configure(bg='grey')
+        self.Frame2['relief'] = 'ridge'
+                
+        image_byt = urlopen(logo).read()
+        image_b64 = io.BytesIO(image_byt)
+        #photo = tk.PhotoImage(data=image_b64)
+        
+        pil_img = Image.open(image_b64)
+        # convert to an image Tkinter can use
+        tk_img = ImageTk.PhotoImage(pil_img)
+
+
+        label1 = tk.Label(self.Frame2,image = tk_img,justify = tk.LEFT)
+        label1.grid(row=0,column=0)        
+
+        basicfont=('Helvetica',10)
+        label2 = tk.Label(self.Frame2,text = introduction,wraplength =1000,justify = tk.LEFT,font=basicfont)
+        label2.grid(row=1,column=0)   
+
+   #     label3 = tk.Label(Frame2,text = " asdasd")
+   #     label3.grid(row=0,column=1)        
+
+        google_news = GNews()
+        google_news.period = '7d' 
+        stock_news = google_news.get_news(stock)
+        
+        n=0
+        news=""
+        dailynews = ""
+        while n < 8:
+            news = stock_news[n]['title']
+            dailynews = dailynews + '\n\n' + news
+            n=n+1
+
+
+        label_news = tk.Label(self.Frame2,text = "News",justify = tk.LEFT,font=basicfont,bg='pink')
+        label_news.grid(row=2,column=0,padx=5,stick='ew')   
+
+        label3 = tk.Label(self.Frame2,text = dailynews,wraplength =1000,justify = tk.LEFT,font=basicfont)
+        label3.grid(row=3,column=0,padx=5,sticky='ew')   
+
+        self.Frame2.grid(row = 1, column=1,pady=20)
+
+    #This function does the calculations and plots for the descriptive frame. puts them on the GUI
+    def DescriptiveFrame(self):
+        self.hide_all_frame()
+        #df = self.getdata()
+
+        #Calculates descriptive means for Closing Price
+        price_mean = np.mean(df['Close'])
+        price_median = np.median(df['Close'])
+        price_std = np.std(df['Close'],ddof=1)
+        price_min = np.min(df['Close'])
+        price_max = np.max(df['Close'])
+        price_range = price_max - price_min
+        price_1st_Quart = np.quantile(df['Close'],0.25,interpolation = 'midpoint')
+        price_3rd_Quart = np.quantile(df['Close'],0.75,interpolation = 'midpoint')
+        price_IQR = stats.iqr(df['Close'], interpolation = 'midpoint')
+
+        #Calculates descriptive means for Volume
+        volume_mean = np.mean(df['Volume'])
+        volume_median = np.median(df['Volume'])
+        volume_std = np.std(df['Volume'],ddof=1)
+        volume_min = np.min(df['Volume'])
+        volume_max = np.max(df['Volume'])
+        volume_range = volume_max - volume_min
+        volume_1st_Quart = np.quantile(df['Volume'],0.25,interpolation = 'midpoint')
+        volume_3rd_Quart = np.quantile(df['Volume'],0.75,interpolation = 'midpoint')
+        volume_IQR = stats.iqr(df['Volume'], interpolation = 'midpoint')
+
+
+        data1=[["Mean",'%.0f'%volume_mean],
+              ["Median",'%.0f'%volume_median],
+              ["Range",'%.0f'%volume_range],
+              ["Standard Deviation",'%.f'%volume_std],
+              ["Maximum",'%.0f'%volume_max],
+              ["Minimum",'%.0f'%volume_min],
+              ["1st Quartile",'%.0f'%volume_1st_Quart],
+              ["3rd Quartile",'%.0f'%volume_3rd_Quart],
+              ["Inter Quartile Range",'%.0f'%volume_IQR]]
+        
+        data2=[["Mean",'%.3f'%price_mean],
+              ["Median",'%.3f'%price_median],
+              ["Range",'%.3f'%price_range],
+              ["Standard Deviation",'%.3f'%price_std],
+              ["Maximum",'%.3f'%price_max],
+              ["Minimum",'%.3f'%price_min],
+              ["1st Quartile",'%.3f'%price_1st_Quart],
+              ["3rd Quartile",'%.3f'%price_3rd_Quart],
+              ["Inter Quartile Range",'%.3f'%price_IQR]]
+        
+        ccolors = plt.cm.BuPu(np.full(2, 0.1))
+
+        #Plots the table, line chart and boxplot        
+        fig = plt.Figure(figsize=(10,7), dpi=self.dpi)
+        plot1 = fig.add_subplot(321)
+        plot2 = fig.add_subplot(322)
+        df1=pd.DataFrame(data1)
+        df2=pd.DataFrame(data2)
+        plot1.axis('off')
+        plot2.axis('off')
+        table1 = plot1.table(cellText=df1.values,
+                colLabels=["Statistic","Value"],
+                colColours =ccolors,
+                loc="center",rowLoc="center",
+                colWidths=[0.4,0.4])
+        table2 = plot2.table(cellText=df2.values,
+                colLabels=["Statistic","Value"],
+                colColours =ccolors,
+                loc="center",rowLoc="center",
+                colWidths=[0.4,0.4])
+        #table1.scale(2, 1)
+        #table2.scale(2, 1)
+        #table1.set_fontsize(20)
+        plot1.set_title("Volume")
+        plot2.set_title("Close Price")
+
+        #fig1 = Figure(figsize = (6, 4),dpi=130)   #Creates a "figure"
+        plot3 = fig.add_subplot(323)   #Adds a subplot to the figure
+        plot4 = fig.add_subplot(325,sharex=plot3)
+
+        plot3.plot(df["Date"],df["Close"])   #We plot the chart on the subplot
+        plot4.plot(df["Date"],df["Volume"])
+        plot3.set_title("Closing Price and Volume Trending", fontsize = 10)
+        plot3.set_ylabel("Close price", fontsize = 10)
+        plot3.set_xlabel("Date", fontsize = 10)
+        plot4.set_ylabel("Volume", fontsize = 10)
+        fig.autofmt_xdate()             #This fixes the date axis iss
+
+        #fig2 = Figure(figsize = (6, 4),dpi=130)   #Creates a "figure"
+        plot5 = fig.add_subplot(324,aspect="auto")   #Adds a subplot to the figure
+        plot6 = fig.add_subplot(326,aspect="auto")
+
+        plot5.boxplot(df["Close"])   #We plot the chart on the subplot
+        plot6.boxplot(df["Volume"])
+        plot5.set_title("Boxplot", fontsize = 10)
+        plot5.get_xaxis().set_visible(False)
+        plot6.get_xaxis().set_visible(False)
+        #fig.autofmt_xdate()             #This fixes the date axis issue
+        fig.tight_layout(pad=3.0)
+        canvas1 = FigureCanvasTkAgg(fig,self.Frame3) #Display the figure in Frame2
+        canvas1.get_tk_widget().grid(row=1,column=0)
+
+        self.Frame3.grid(row = 1, column=1,pady=20)
+        self.change_button_color(2)
+        
+    #This function plots the technical indicator graphs and displays them on the screen
+    def ChartFrame(self):
+
+        self.hide_all_frame()
+        self.Frame1.configure(bg='grey')                
+
+        #df = self.getdata()
+                    
+        label2 = tk.Label(self.scrollable_frame,
+                          text = f"The line chart below plots the daily change in closing stock price for the selected stock by Date"
+                          ,wraplength = 400)
+        label2.grid(row=0,column=0,columnspan=1)
+        
+        fig2 = plt.Figure(figsize=(6,4), dpi=self.dpi)
+        plot2 = fig2.add_subplot()
+        df["Day_Perc_Change"] = df["Close"].pct_change()*100
+        plot2.plot(df["Date"],df["Day_Perc_Change"])   #We plot the chart on the subplot
+        plot2.set_title("Daily change % of stock price", fontsize = 10)
+        plot2.set_ylabel("Change %", fontsize = 10)
+        plot2.set_xlabel("Date", fontsize = 10)
+        fig2.autofmt_xdate()             #This fixes the date axis issue
+        canvas2 = FigureCanvasTkAgg(fig2,self.scrollable_frame) #Display the figure in Frame2
+        canvas2.get_tk_widget().grid(row=1,column=0,padx=10,pady=10)
+        # canvas2.draw()   
+        
+        label3 = tk.Label(self.scrollable_frame,
+                          text = "The scatter chart below plots the Previous Closing Price and Close price for each day"
+                          ,wraplength = 400)
+        label3.grid(row=0,column=1,columnspan=1)
+
+        fig4 = plt.Figure(figsize=(6,4), dpi=self.dpi)
+        plot4 = fig4.add_subplot()
+        lr = stats.linregress(df.Close, df.Open)
+        x = df.Close
+        y = lr.intercept + lr.slope * x
+        plot4.scatter(data = df,x = df.Close.shift(1), y ="Close",label="Date")
+        plot4.plot(x, y, 'r')
+        plot4.set_title("Regression", fontsize = 10)
+        plot4.set_ylabel("Previous Day Close Price", fontsize = 10)
+        plot4.set_xlabel("Close Price", fontsize = 10)
+        fig4.autofmt_xdate()             #This fixes the date axis issue
+        canvas4 = FigureCanvasTkAgg(fig4,self.scrollable_frame) #Display the figure in Frame2
+        canvas4.get_tk_widget().grid(row=1,column=1,padx=10,pady=10)
+
+        label2 = tk.Label(self.scrollable_frame,
+                          text = f'''
+Pie charts classify how each day performedcompared to the previous day 
+based on the following definition, where x is the % change from the previous day
+x > -0.5 and x <= 0.5            "Slight or No change"
+x > 0.5 and x <= 3               "Increase"
+x > -3 and x <= -0.5             "Decrease"
+x > 3 and x <= 7                 "Strong Increase"
+x > -7 and x <= -3               "Strong Decrease"
+x > 7                            "Significant Increase"
+x < -7                           "Significant Drop"'''
+                          ,font=('Helvetica',10))
+        label2.grid(row=2,column=0,columnspan=1)   
+
+        #plots the pie chart with 
+        fig3 = plt.Figure(figsize=(6,4), dpi=self.dpi)
+        plot3 = fig3.add_subplot()
+        def trend(x):
+            if x > -0.5 and x <= 0.5:
+                return "Slight or No change"
+            elif x > 0.5 and x <= 3:
+                return "Increase"
+            elif x > -3 and x <= -0.5:
+                return "Decrease"
+            elif x > 3 and x <= 7:
+                return "Strong Increase"
+            elif x > -7 and x <= -3:
+                return "Strong Decrease"
+            elif x > 7:
+                return "Significant Increase"
+            elif x < -7:
+                return "Significant Drop"
+        df["Day_Perc_Change"] = df["Close"].pct_change()*100
+        df['Day_Perc_Change'] = df['Day_Perc_Change'].fillna(0)  # This is the part I added
+        df["Trend"]= df.apply(lambda row: trend(row['Day_Perc_Change']), axis=1)
+        df['Trend'] = df['Trend'].fillna('OK')
+        pie_data = df.groupby("Trend")
+        pie_label = sorted([i for i in df.loc[:, "Trend"].unique()])
+        plot3.pie(pie_data["Trend"].count(), 
+        autopct = "%1.1f%%", radius = 1.2)
+        plot3.set_title("Pie chart", fontsize = 10)
+        fig3.subplots_adjust(left=0.05, bottom=0.1, right=0.7)
+        fig3.legend(labels=pie_label,loc = 'center right')
+        canvas3 = FigureCanvasTkAgg(fig3,self.scrollable_frame) #Display the figure in Frame2
+        canvas3.get_tk_widget().grid(row=2,column=1,padx=10,pady=10)
+
+        label2 = tk.Label(self.scrollable_frame,text = "Momentum Anlysis",borderwidth=2,relief="ridge",font=('Arial',30,'bold'))
+        label2.grid(row=4,column=0,columnspan=500,pady=5)       
+        
+        label2 = tk.Label(self.scrollable_frame
+                          ,text = f'''
+                          The line chart below shows the closing price vs the 20 day SMA for the by Date. 
+                          A moving average (MA) is a stock indicator that is commonly used in technical analysis. 
+                          The reason for calculating the moving average of a stock is to help smooth out the price
+                          data over a specified period of time by creating a constantly updated average price.
+                          A simple moving average (SMA) is a calculation that takes the arithmetic mean of a given 
+                          set of prices over the specific number of days in the past; for example, over the previous 
+                          15, 30, 100, or 200 days.
+                          
+                          Source: Investopedia'''
+                          ,font=('Helvetica',10))
+        label2.grid(row=6   ,column=0,columnspan=1,pady=5)       
+        
+        fig7 = plt.Figure(figsize=(6,4), dpi=self.dpi)
+        plot7 = fig7.add_subplot()
+        plot7.plot(df["Date"],df["Close"], label = "Close price")
+        plot7.plot(df["Date"],df["Close"].rolling(window = 20).mean(),label = "Close price 20days moving average")
+        plot7.set_title("Close price vs moving average", fontsize = 14)
+        plot7.set_ylabel("Close price", fontsize = 12)
+        plot7.set_xlabel("Date", fontsize = 12)
+        plot7.legend(fontsize = 8)
+        fig7.autofmt_xdate()
+        canvas7 = FigureCanvasTkAgg(fig7,self.scrollable_frame) #Display the figure in Frame2
+        canvas7.get_tk_widget().grid(row=6,column=1,padx=10,pady=10)
+        
+        label2 = tk.Label(self.scrollable_frame
+                          ,text = f'''
+                          Moving average convergence divergence (MACD) is a trend-following momentum indicator 
+                          that shows the relationship between two moving averages of a stock's price. The MACD 
+                          is calculated by subtracting the 26-period exponential moving average (EMA) from the 
+                          12-period EMA.A nine-day EMA of the MACD called the "signal line"
+
+                          In a bullish crossover, just like in Moving Averages, a buy signal occurs when MACD 
+                          crosses above the signal line. A bearish signal occurs when MACD crosses below the signal
+                          line. If a crossover occurs with a high sloping MACD, this can be a sign of an overbought
+                          or oversold condition, depending on if the crossover is bullish or bearish respectively. 
+                          MACD is a great indicator for understanding if movement in the price is strong or weak. 
+                          A weak movement is likely to correct and a strong movement is likely to continue.
+                          
+                          Source: Investopedia'''
+                          ,font=('Helvetica',10))
+        label2.grid(row=7,column=0,sticky='w')       
+        
+        df1 = df['Close']        
+        shortEMA = df1.ewm(span=12, adjust=False).mean()    #Exponential moving average for 12 days
+        longEMA = df1.ewm(span=26, adjust=False).mean()     #Exponential moving average for 26 days
+        macd = longEMA - shortEMA       
+        signal = macd.ewm(span=9, adjust=False).mean()
+        
+        fig8 = plt.Figure(figsize=(6,4), dpi=self.dpi)
+        plot8 = fig8.add_subplot()
+        plot8.plot(df["Date"],signal, label = "Signal Line",color='r')
+        plot8.plot(df["Date"],macd,label = "MACD")
+        plot8.set_title("MACD vs Signal", fontsize = 14)
+        plot8.set_ylabel("MACD", fontsize = 10)
+        plot8.set_xlabel("Date", fontsize = 10)
+        plot8.legend(fontsize = 8)
+        fig8.autofmt_xdate()             #This fixes the date axis issue
+        canvas8 = FigureCanvasTkAgg(fig8,self.scrollable_frame) #Display the figure in Frame2
+        canvas8.get_tk_widget().grid(row=7,column=1,padx=10,pady=10)
+        
+        fig6 = plt.Figure(figsize=(6,4), dpi=self.dpi)
+        plot6 = fig6.add_subplot()
+        width = .4
+        width2 = .05
+        up = df[df.Close>=df.Open]
+        down = df[df.Close<df.Open]
+        col1 = 'green'
+        col2 = 'red'
+        plot6.bar(up.index,up.Close-up.Open,width,bottom=up.Open,color=col1)
+        plot6.bar(up.index,up.High-up.Close,width2,bottom=up.Close,color=col1)
+        plot6.bar(up.index,up.Low-up.Open,width2,bottom=up.Open,color=col1)
+        plot6.bar(down.index,down.Close-down.Open,width,bottom=down.Open,color=col2)
+        plot6.bar(down.index,down.High-down.Open,width2,bottom=down.Open,color=col2)
+        plot6.bar(down.index,down.Low-down.Close,width2,bottom=down.Close,color=col2)
+        plt.xticks(rotation=45, ha='right')
+        plot6.set_title("Candle Stick", fontsize = 14)
+        plot6.set_ylabel("Price", fontsize = 12)
+        plot6.set_xlabel("Date", fontsize = 12)
+        fig6.autofmt_xdate()             #This fixes the date axis issue
+        canvas6 = FigureCanvasTkAgg(fig6,self.scrollable_frame) #Display the figure in Frame2
+        canvas6.get_tk_widget().grid(row=8,column=0,columnspan=200,sticky='ew',padx=10,pady=10)
+        
+        # self.scrollable_frame.bind("<Configure>",lambda event: self.canvas.configure(width=self.canvas.winfo_reqwidth()))
+        # self.canvas.bind("<Configure>", lambda event: self.canvasconfig)
+        self.Frame1.grid(column=1,row=2,rowspan=1,columnspan=3)
+        self.change_button_color(3)
+
+    #This function creates the options menu to choose between Arima and LP models
+    def PrescriptiveFrame(self):
+        self.hide_all_frame()
+        self.change_button_color(4)
+
+        self.Pred_Frame.grid(column=2,row=2,)
+
+    #This function creates the screen for the Arima model
+    def Arima_frame(self):
+        self.LP_Frame.grid_forget()
+        self.arima_label = tk.Label(self.Arima_Frame,text='ARIMA Model'
+                                    ,font = ('Helvetica',20,'bold'))
+        self.arima_label.grid(row=0,column=0,columnspan=2,sticky='ew',pady=10)
+
+        self.arima_label = tk.Label(self.Arima_Frame,
+                                    text='This Arima prediction model uses auto Arima to perform a step wise analysis to find out the optimal differencing parameters. This model uses historical data for 3 years.'
+                                    ,wraplength=500,
+                                    font = ('Helvetica',10))
+        self.arima_label.grid(row=1,column=0,columnspan=2,sticky='ew',pady=5)
+
+        self.forecast_label = tk.Label(self.Arima_Frame,text='Enter the time period to forecast'
+                                       ,font = ('Helvetica',10,'bold'))
+        self.forecast_label.grid(row=2,column=0,sticky='ew',padx=5,pady=10)
+
+        self.pred_entry = tk.Entry(self.Arima_Frame, width=15)
+        self.pred_entry.grid(row=2,column=1,pady=10)
+        
+        #Creates the Predict Button
+        self.btn_pred = tk.Button(self.Arima_Frame,text='Predict',command = self.Arima_Predict)
+        self.btn_pred.grid(row=4,columnspan=2,pady=10)
+        
+        self.Arima_Frame.grid(column=1,row=2,columnspan=3,pady=10)
+
+    #This function does the validations, calulations, plots for the linear progression model and plots them on the screen        
+    def Arima_Predict(self):
+        
+        try: 
+            int(self.pred_entry.get())
+            forecast_periods = int(self.pred_entry.get())
+            df1 = yf.download(self.name_entry.get(),period='3y')
+            df1.reset_index(inplace=True,level=0)
+            
+            model = pm.auto_arima(df1.Close
+                                  ,start_p=1 
+                                  ,start_q=1
+                                  ,test='adf'       # use adftest to find optimal 'd'
+                                  ,max_p=3 
+                                  ,max_q=3         # maximum p and q (more info needed)
+                                  ,m=1              # frequency of series (more info needed)
+                                  ,d=None           # let model determine 'd'
+                                  ,seasonal=False   # No Seasonality (unclear decision)
+                                  ,start_P=0 
+                                  ,D=0 
+                                  ,trace=True
+                                  ,error_action='ignore'  
+                                  ,suppress_warnings=True 
+                                  ,stepwise=True)
+                    
+            fc, conf_int = model.predict(n_periods=forecast_periods, return_conf_int=True)
+            index_of_fc = np.arange(len(df1.Close), len(df1.Close)+forecast_periods)
+            
+            #create underlying series for plotting
+            fc_series = pd.Series(fc, index=index_of_fc)
+            lower_series = pd.Series(conf_int[:, 0], index=index_of_fc)
+            upper_series = pd.Series(conf_int[:, 1], index=index_of_fc)
+            
+            #plot
+            fig = plt.Figure(figsize=(6,4), dpi=self.dpi)
+            plot = fig.add_subplot()     
+            plot.plot(df1.Close)
+            plot.plot(fc_series, color='darkgreen')
+            plot.fill_between(lower_series.index 
+                             ,lower_series 
+                             ,upper_series 
+                             ,color='k' 
+                             ,alpha=.05)
+            
+            plot.set_title(f"{forecast_periods} Forecast")
+            canvas = FigureCanvasTkAgg(fig,self.Arima_Frame) #Display the figure in Frame2
+            canvas.get_tk_widget().grid(row=5,column=0,columnspan=500,sticky='ew',padx=10,pady=10)
+        except:
+            tk.messagebox.showerror("Incorrect Input","Please enter a integer value")
+           
+    #This function creates the screen for the LP model
+    def LP_frame(self):
+        self.Arima_Frame.grid_forget()
+        self.LP_label = tk.Label(self.LP_Frame,text='Linear Regression Model',font = ('Helvetica',20,'bold'))
+        self.LP_label.grid(row=0,columnspan = 2,sticky='ew')
+
+        self.LP_label1 = tk.Label(self.LP_Frame,
+                                    text='This Linear prediction model uses the 10 day simple moving average as the predictor and can provide the prediction for up to 10 days ahead using stock price data for 3 years. The training size can be between 60% (0.6) and 90% (0.9)'
+                                    ,wraplength=500,font = ('Helvetica',10))
+        self.LP_label1.grid(row=1,column=0,columnspan=2,sticky='ew',pady=5)
+
+        self.forecast_label = tk.Label(self.LP_Frame,text='Enter the time period to forecast',font = ('Helvetica',10,'bold'))
+        self.forecast_label.grid(row=2,column=0,sticky='ew',padx=5,pady=10)
+
+        self.pred_entry1 = tk.Entry(self.LP_Frame, width=15)
+        self.pred_entry1.grid(row=2,column=1)
+
+        self.test_label = tk.Label(self.LP_Frame,text='Enter the training size of the model',font = ('Helvetica',10,'bold'))
+        self.test_label.grid(row=3,column=0,sticky='ew',padx=5,pady=10)
+
+        self.test_entry = tk.Entry(self.LP_Frame, width=15)
+        self.test_entry.grid(row=3,column=1)
+                
+        self.btn_pred = tk.Button(self.LP_Frame,text='Predict',command = self.LP_Predict)
+        self.btn_pred.grid(row=4,columnspan = 2)
+
+        self.LP_Frame.grid(row=2,column=1,columnspan=3)
+
+    #This function does the validations and calculations for the linear progression model and plots them on the screen
+    def LP_Predict(self):
+        try: 
+            #Input validation for forecast period and training size
+            float(self.test_entry.get()) 
+            int(self.pred_entry1.get())
+            forecast_num = int(self.pred_entry1.get())
+            test_size = 1-float(self.test_entry.get())
+            if (test_size and test_size < 0.41) > 0.09:
+                if forecast_num > 0 and forecast_num < 11:
+                    df = yf.download(self.name_entry.get(),period='3y')
+                    # Only keep close columns 
+                    df=df[['Close']] 
+                    df['S_10'] = df['Close'].shift(1).rolling(window=10).mean() 
+                    df= df.dropna()        
+                    X = df[['S_10']] #Independent variable 
+                    y = df['Close'] #Dependent variable
+
+                    #Splits the dependent and independent variable into training and test data based on size
+                    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size,shuffle=False,random_state = 0)
+
+                    #Trains the linear regression model on training data and calculates the r2 value
+                    linear = LinearRegression().fit(X_train,y_train)
+                    r2_score = linear.score(X_test,y_test)
+
+                    #Creates the prediction for the Test data set and puts in a dataframe
+                    predicted_price = linear.predict(X_test)  
+                    predicted_price = pd.DataFrame(predicted_price,index=y_test.index,columns = ['price'])  
+                    
+                    #plots to results for test data
+                    fig = plt.Figure(figsize=(6,4), dpi=100)
+                    plot = fig.add_subplot()
+                    plot.plot(y_test)
+                    plot.plot(predicted_price)
+                    plot.set_title("Actual vs Predicted Values for Test Data")
+                    plot.legend(['predicted_price','actual_price'])  
+                    plot.set_xlabel("Date")
+                    plot.set_ylabel("Price")
+                    fig.autofmt_xdate()
+                    canvas = FigureCanvasTkAgg(fig,self.LP_Frame) #Display the figure in Frame2
+                    canvas.get_tk_widget().grid(row=6,column=0,columnspan=500,sticky='ew',padx=10,pady=10)
+
+                    #Creates the prediction for the Test data set and puts in a dataframe
+                    self.test_label = tk.Label(self.LP_Frame,
+                                               text=f'The coefficient of Linear Regreesion is {r2_score}',
+                                               font = ('Helvetica',10,'bold'))
+                    self.test_label.grid(row=7,column=0,sticky='ew',padx=5,pady=10)
+                    
+                    startdate = dt.today()
+                    df.reset_index(level=0,inplace=True)
+
+                    #Adds future dates to df dataframe and calculates the rolling averages for those dates
+                    for i in range(forecast_num):
+                        x1 = pd.date_range(startdate + datetime.timedelta(days=i),periods=1)
+                        x1 = pd.DataFrame(x1,columns=['Date'])
+                        x1['Close'] = np.array(df[-10:]['Close']).mean()
+                        df = pd.DataFrame.append(df,x1)
+
+                    df.reset_index(inplace=True)
+
+                    prediction_dates = np.array(df[-forecast_num:]['Date'])
+                    prediction_set = df[-forecast_num:][['Close']]
+                    prediction_set = prediction_set.rename(columns={"Close": "S_10"})
+                    df = df[:-forecast_num]
+
+                    future_predicted_price = linear.predict(prediction_set)
+                    future_predicted_price = pd.DataFrame({"Date":prediction_dates,"price":future_predicted_price},index=prediction_set.index)
+
+                    #Plots the future values along with actual values for last 60 days
+                    df1 = df[-60:]
+                    fig = plt.Figure(figsize=(6,4), dpi=100)
+                    plot = fig.add_subplot()
+                    plot.plot(df1['Date'],df1['Close'])
+                    plot.plot(future_predicted_price['Date'],future_predicted_price['price'])
+                    plot.set_title(f"{forecast_num} Forecast")
+                    plot.legend(['Available Value','Predicted Value'])
+                    plot.set_xlabel("Date")
+                    plot.set_ylabel("Price")
+                    fig.autofmt_xdate()
+                    canvas = FigureCanvasTkAgg(fig,self.LP_Frame) #Display the figure in Frame2
+                    canvas.get_tk_widget().grid(row=8,column=0,columnspan=500,sticky='ew',padx=10,pady=10)
+                
+                else:
+                    tk.messagebox.showerror("Invalid Input","Please enter a value between 1 and 10")   
+            else:
+                tk.messagebox.showerror("Invalid Input","Please enter a value between 0.6 and 0.9")   
+        except:
+            tk.messagebox.showerror("Invalid Input","Invalid Input")
+            
+root = StockApp()
+root.mainloop()
